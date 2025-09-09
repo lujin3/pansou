@@ -1,13 +1,15 @@
 # 构建阶段
 # 使用 --platform=$BUILDPLATFORM 确保构建器始终在运行 Actions 的机器的原生架构上运行 (通常是 linux/amd64)
 # $BUILDPLATFORM 是 buildx 自动提供的变量
-FROM --platform=$BUILDPLATFORM golang:1.23-alpine AS builder
+FROM --platform=$BUILDPLATFORM golang:1.24-alpine AS builder
 
 # 安装构建依赖
 RUN apk add --no-cache git ca-certificates tzdata
 
 # 设置工作目录
 WORKDIR /app
+
+ENV GOPROXY=https://goproxy.cn,direct
 
 # 复制依赖文件
 COPY go.mod go.sum ./
@@ -43,6 +45,7 @@ RUN mkdir -p /app/cache
 # 从构建阶段复制可执行文件
 # buildx 会智能地从对应平台的 builder 中复制正确的可执行文件
 COPY --from=builder /app/pansou /app/pansou
+COPY --from=builder /app/templates /app/templates
 
 # 设置工作目录
 WORKDIR /app

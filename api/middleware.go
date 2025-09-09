@@ -2,7 +2,9 @@ package api
 
 import (
 	"fmt"
+	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
@@ -71,3 +73,18 @@ func LoggerMiddleware() gin.HandlerFunc {
 				clientIP, reqMethod, displayURI, statusCode, latencyTime.String())))
 	}
 } 
+
+
+
+func AuthMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		token := c.GetHeader("Authorization")
+		if token != fmt.Sprintf("Bearer %s", os.Getenv("TOKEN")) {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+			c.Abort()
+			return
+		}
+		c.Next()
+	}
+}
+	

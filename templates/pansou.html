@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>资源搜索</title>
+<style>
+body {
+  margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif; background:#f8f9fa; color:#333;
+}
+.container { max-width:960px; margin:0 auto; padding:16px; }
+.top-section { background:#fff; padding:20px; border-radius:12px; box-shadow:0 4px 12px rgba(0,0,0,.08); margin-bottom:20px; }
+.row { display:flex; gap:8px; }
+.col { flex:1; }
+input, button {
+  padding:12px; font-size:16px; border-radius:8px; border:1px solid #ddd; outline:none; transition: all .2s;
+}
+input:focus { border-color:#4caf50; box-shadow:0 0 0 3px rgba(76,175,80,.2); }
+button { background:#4caf50; color:#fff; border:none; font-weight:600; cursor:pointer; }
+button:hover { background:#43a047; }
+button:disabled { background:#ccc; cursor:not-allowed; }
+.status-container { text-align:center; margin:12px 0; }
+#status { padding:6px 12px; border-radius:12px; font-size:14px; }
+#status.error { background:#fff5f5;color:#f44336; }
+#status.success { background:#f0fdf4;color:#4caf50; }
+#status.warning { background:#fff8e1;color:#ff9800; }
+.tabs { display:flex; gap:8px; overflow-x:auto; padding:8px; background:#fff; border-radius:8px; margin-bottom:16px; }
+.tab { padding:6px 12px; background:#f5f5f5; border-radius:6px; font-size:14px; white-space:nowrap; cursor:pointer; flex-shrink:0; }
+.tab.active { background:#4caf50; color:#fff; font-weight:600; }
+.tabs:empty { display: none; }
+.results-container { margin-top:12px; }
+.list { display:none; gap:12px; flex-wrap:wrap; }
+.item { flex:1 1 calc(100% - 24px); background:#fff; border:1px solid #e0e0e0; border-radius:8px; padding:12px; transition:all .2s; box-shadow:0 2px 6px rgba(0,0,0,.05); }
+.item:hover { transform:translateY(-2px); box-shadow:0 4px 12px rgba(0,0,0,.1); }
+.item a { color:#4caf50; font-weight:600; text-decoration:none; display:block; margin-bottom:6px; }
+.item-meta { font-size:13px; color:#666; display:flex; flex-wrap:wrap; gap:8px; }
+.badge { background:#4caf50;color:#fff;padding:2px 6px;border-radius:4px;font-size:12px; }
+.datetime { margin-left:auto; white-space:nowrap; }
+.empty-state { text-align:center; padding:40px 20px; background:#fff; border-radius:8px; display:none; }
+.loading { border:2px solid #ddd; border-top:2px solid #333; border-radius:50%; width:18px; height:18px; animation:spin 1s linear infinite; display:inline-block; vertical-align:middle; }
+@keyframes spin {100%{transform:rotate(360deg);} }
+@media (min-width:600px){ .item{flex:1 1 calc(50% - 16px);} }
+@media (min-width:900px){ .item{flex:1 1 calc(33% - 16px);} }
+
+/* 模态框样式 */
+#tokenModal { display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,.5); justify-content:center; align-items:center; z-index:9999; }
+#tokenModalContent { background:#fff; padding:24px; border-radius:12px; max-width:400px; width:90%; box-shadow:0 4px 12px rgba(0,0,0,.2); text-align:center; }
+#tokenModalContent input { width:80%; margin-bottom:16px; }
+#tokenModalContent button { width:80%; font-size:16px; }
+</style>
+</head>
+<body>
+<div id="tokenModal">
+  <div id="tokenModalContent">
+    <h3>请输入访问令牌</h3>
+    <input id="modalToken" type="password" placeholder="Token">
+    <button id="modalSave">保存</button>
+  </div>
+</div>
+
+<div class="container" id="mainContent" style="display:none;">
+  <div class="top-section">
+    <div class="row">
+      <input id="kw" type="text" placeholder="请输入关键词" class="col">
+      <button id="go">搜索</button>
+    </div>
+  </div>
+  <div class="status-container">
+    <div id="status"></div>
+  </div>
+
+  <div class="tabs" id="tabs"></div>
+  <div class="results-container" id="results"></div>
+  <div class="empty-state" id="emptyState">
+    <div style="font-size:40px;">🔍</div>
+    <h3>未找到相关资源</h3>
+    <p>请尝试其他关键词</p>
+  </div>
+</div>
+
+<script>
+const status = document.getElementById('status');
+const kwInput = document.getElementById('kw');
+const go = document.getElementById('go');
+const tabs = document.getElementById('tabs');
+const results = document.getElementById('results');
+const emptyState = document.getElementById('emptyState');
+const tokenModal = document.getElementById('tokenModal');
+const modalToken = document.getElementById('modalToken');
+const modalSave = document.getElementById('modalSave');
+const mainContent = document.getElementById('mainContent');
+
+// Initialize token from localStorage or use empty string
+let authToken = localStorage.getItem('searchToken') || '';
+
+const typeMap = {
+  'quark':'夸克网盘',
+  'baidu':'百度网盘',
+  'aliyun':'阿里云盘',
+  'xunlei':'迅雷资源',
+  'magnet':'磁力链接',
+  'tianyi':'天翼云盘',
+  'uc':'UC网盘',
+  'mobile':'移动云盘',
+  '115':'115网盘',
+  'pikpak':'PikPak',
+  '123':'123网盘',
+  'others':'其他',
+
+};
+const typeOrder = ['quark','baidu','aliyun','xunlei','magnet','tianyi','uc','mobile','115','pikpak','123','others'];
+
+function initUI(){
+  mainContent.style.display = 'block';
+  kwInput.focus();
+  status.textContent = '请输入关键词开始搜索';
+  status.className = 'warning';
+}
+
+function checkToken(){
+  if(authToken){
+    initUI();
+  } else {
+    tokenModal.style.display = 'flex';
+    tokenTip.style.display = 'none'; // 初始时隐藏提示
+    modalToken.focus();
+  }
+}
+
+// Modal save button handler
+modalSave.onclick = () => {
+  const val = modalToken.value.trim();
+  if(!val) {
+    alert('请输入有效的令牌');
+    return;
+  }
+  authToken = val;
+  localStorage.setItem('searchToken', authToken);
+  tokenModal.style.display = 'none';
+  initUI();
+};
+
+// Allow Enter key in modal
+modalToken.onkeypress = (e) => {
+  if(e.key === 'Enter') modalSave.click();
+};
+
+async function search(){
+  const kw = kwInput.value.trim();
+  if(!kw) {
+    status.textContent = '请输入搜索关键词';
+    status.className = 'warning';
+    return;
+  }
+  
+  status.innerHTML = '<span class="loading"></span> 搜索中...';
+  status.className = '';
+  results.innerHTML = '';
+  tabs.innerHTML = '';
+  emptyState.style.display = 'none';
+  
+  try {
+    const res = await fetch(`/api/search?kw=${encodeURIComponent(kw)}&res=merge`, {
+      headers: { Authorization: `Bearer ${authToken}` }
+    });
+    
+    if(res.status === 401){
+      localStorage.removeItem('searchToken');
+      authToken = '';
+      tokenModal.style.display = 'flex';
+      modalToken.value = '';
+      modalToken.focus();
+      mainContent.style.display = 'none';
+      tokenTip.textContent = '访问令牌已过期或无效，请重新输入';
+      tokenTip.style.display = 'block';
+      tokenTip.style.color = '#f44336';
+      return;
+    }
+    
+    const data = await res.json();
+    if(data.code !== 0) throw new Error(data.message || '接口错误');
+
+    const merged = data.data.merged_by_type;
+    const types = Object.keys(merged).sort((a,b) => {
+      const ai = typeOrder.indexOf(a), bi = typeOrder.indexOf(b);
+      return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
+    });
+
+    if(!types.length){ 
+      emptyState.style.display = 'block'; 
+      status.textContent = '未找到结果'; 
+      status.className = 'warning';
+      return; 
+    }
+
+    // Create tabs and result lists
+    types.forEach((type, i) => {
+      const tab = document.createElement('div');
+      tab.className = 'tab' + (i === 0 ? ' active' : '');
+      tab.dataset.type = type;
+      tab.textContent = `${typeMap[type] || type} (${merged[type].length})`;
+      tab.onclick = () => show(type);
+      tabs.appendChild(tab);
+
+      const list = document.createElement('div'); 
+      list.className = 'list'; 
+      list.id = `list-${type}`;
+      
+      // Sort by datetime (newest first)
+      merged[type].sort((a,b) => new Date(b.datetime || 0) - new Date(a.datetime || 0))
+        .forEach(item => {
+          const div = document.createElement('div'); 
+          div.className = 'item';
+          div.innerHTML = `
+            <a href="${item.url}" target="_blank">${item.note || item.url}</a>
+            <div class="item-meta">
+              <span>来源:${item.source}</span>
+              ${item.password ? `<span class="badge">🔑${item.password}</span>` : ''}
+              ${item.datetime ? `<span class="datetime">${new Date(item.datetime).toISOString().replace('T', ' ').replace('Z', '').replace('.000', '')}</span>` : ''}
+            </div>
+          `;
+          list.appendChild(div);
+        });
+      results.appendChild(list);
+    });
+    
+    show(types[0]);
+    status.textContent = '搜索完成'; 
+    status.className = 'success';
+
+  } catch(e){
+    status.textContent = '错误: ' + e.message;
+    status.className = 'error';
+    emptyState.style.display = 'block';
+  }
+}
+
+function show(type){
+  document.querySelectorAll('.list').forEach(l => l.style.display = 'none');
+  const targetList = document.getElementById(`list-${type}`);
+  if(targetList) targetList.style.display = 'flex';
+  
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  const targetTab = document.querySelector(`.tab[data-type="${type}"]`);
+  if(targetTab) targetTab.classList.add('active');
+}
+
+// Event listeners
+go.onclick = search;
+kwInput.onkeypress = (e) => { 
+  if(e.key === 'Enter') search(); 
+};
+
+// Initialize the app
+checkToken();
+</script>
+</body>
+</html>

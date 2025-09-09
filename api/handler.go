@@ -4,14 +4,15 @@ import (
 	// "fmt"
 	"net/http"
 	// "os"
-	
-	"github.com/gin-gonic/gin"
+
 	"pansou/config"
 	"pansou/model"
 	"pansou/service"
-	jsonutil "pansou/util/json"
 	"pansou/util"
+	jsonutil "pansou/util/json"
 	"strings"
+
+	"github.com/gin-gonic/gin"
 )
 
 // 保存搜索服务的实例
@@ -205,3 +206,8 @@ func SearchHandler(c *gin.Context) {
 	jsonData, _ := jsonutil.Marshal(response)
 	c.Data(http.StatusOK, "application/json", jsonData)
 } 
+
+
+func PansouPage(c *gin.Context) {
+	c.HTML(http.StatusOK, "pansou.html", nil)
+}

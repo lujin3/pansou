@@ -1,10 +1,11 @@
 package api
 
 import (
-	"github.com/gin-gonic/gin"
 	"pansou/config"
 	"pansou/service"
 	"pansou/util"
+
+	"github.com/gin-gonic/gin"
 )
 
 // SetupRouter 设置路由
@@ -22,9 +23,14 @@ func SetupRouter(searchService *service.SearchService) *gin.Engine {
 	r.Use(CORSMiddleware())
 	r.Use(LoggerMiddleware())
 	r.Use(util.GzipMiddleware()) // 添加压缩中间件
+	r.LoadHTMLGlob("templates/*.html")
+
+	r.GET("/", PansouPage)
 	
 	// 定义API路由组
 	api := r.Group("/api")
+	api.Use(AuthMiddleware())
+
 	{
 		// 搜索接口 - 支持POST和GET两种方式
 		api.POST("/search", SearchHandler)
