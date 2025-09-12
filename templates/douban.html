@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>发现 · 影视</title>
+<style>
+body { margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif; background:#f8f9fa; color:#333; }
+.container { max-width:960px; margin:0 auto; padding:16px; }
+.top-section { background:#fff; padding:20px; border-radius:12px; box-shadow:0 4px 12px rgba(0,0,0,.08); margin-bottom:20px; }
+.row { display:flex; gap:8px; }
+.col { flex:1; }
+input, button { padding:12px; font-size:16px; border-radius:8px; border:1px solid #ddd; outline:none; transition: all .2s; }
+input:focus { border-color:#4caf50; box-shadow:0 0 0 3px rgba(76,175,80,.2); }
+button { background:#4caf50; color:#fff; border:none; font-weight:600; cursor:pointer; }
+button:hover { background:#43a047; }
+.status-container { text-align:center; margin:12px 0; }
+#status { padding:6px 12px; border-radius:12px; font-size:14px; }
+#status.error { background:#fff5f5;color:#f44336; }
+#status.success { background:#f0fdf4;color:#4caf50; }
+#status.warning { background:#fff8e1;color:#ff9800; }
+.tabs { display:flex; gap:8px; overflow-x:auto; padding:8px; background:#fff; border-radius:8px; margin-bottom:16px; }
+.tab { padding:6px 12px; background:#f5f5f5; border-radius:6px; font-size:14px; white-space:nowrap; cursor:pointer; flex-shrink:0; }
+.tab.active { background:#4caf50; color:#fff; font-weight:600; }
+.loading { border:2px solid #ddd; border-top:2px solid #333; border-radius:50%; width:18px; height:18px; animation:spin 1s linear infinite; display:inline-block; vertical-align:middle; }
+@keyframes spin {100%{transform:rotate(360deg);} }
+.section-title { font-weight:700; margin:8px 0 8px; color:#333; }
+.card-grid { display:grid; grid-template-columns:repeat(2, 1fr); gap:12px; }
+@media (min-width:700px){ .card-grid{ grid-template-columns:repeat(3, 1fr);} }
+@media (min-width:960px){ .card-grid{ grid-template-columns:repeat(4, 1fr);} }
+.toolbar { display:flex; justify-content:space-between; align-items:center; gap:8px; margin:8px 0 8px; }
+.toolbar .right { margin-left:auto; }
+.toolbar select { padding:8px 10px; border-radius:8px; border:1px solid #ddd; background:#fff; }
+.card { background:#fff; border:1px solid #e0e0e0; border-radius:10px; overflow:hidden; box-shadow:0 2px 6px rgba(0,0,0,.05); cursor:pointer; transition:transform .15s ease, box-shadow .15s ease; }
+.card:hover { transform:translateY(-2px); box-shadow:0 6px 16px rgba(0,0,0,.12); }
+.card img { width:100%; aspect-ratio:2/3; object-fit:cover; display:block; background:#f2f2f2; }
+.card .card-body { padding:10px; }
+.card .title { font-size:14px; font-weight:600; color:#222; line-height:1.4; height:40px; overflow:hidden; }
+.card .subtitle { margin-top:4px; font-size:12px; color:#777; line-height:1.4; height:34px; overflow:hidden; }
+.card .meta { margin-top:6px; font-size:12px; color:#666; display:flex; gap:8px; align-items:center; }
+.rate { background:#ff9800; color:#fff; padding:2px 6px; border-radius:4px; font-weight:700; }
+.year { margin-left:auto; color:#888; }
+.badge { background:#4caf50; color:#fff; padding:2px 6px; border-radius:4px; font-size:12px; font-weight:700; }
+
+/* 模态框样式 */
+#tokenModal { display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,.5); justify-content:center; align-items:center; z-index:9999; }
+#tokenModalContent { background:#fff; padding:24px; border-radius:12px; max-width:400px; width:90%; box-shadow:0 4px 12px rgba(0,0,0,.2); text-align:center; }
+#tokenModalContent input { width:80%; margin-bottom:16px; }
+#tokenModalContent button { width:80%; font-size:16px; }
+</style>
+</head>
+<body>
+<!-- 令牌改为独立页面，去掉内嵌弹窗 -->
+
+<div class="container" id="mainContent" style="display:none;">
+  <div class="top-section">
+    <div class="row">
+      <input id="kw" type="text" placeholder="请输入影视名称（电影/电视剧/综艺）" class="col">
+      <button id="go">搜索</button>
+    </div>
+    <div class="section-title">发现 · 豆瓣精选</div>
+    <div class="tabs" id="doubanTabs"></div>
+    <div class="toolbar">
+      <div></div>
+      <div class="right">
+        <select id="sortSelect">
+          <option value="default">默认排序</option>
+          <option value="rate_desc">评分从高到低</option>
+          <option value="rate_asc">评分从低到高</option>
+          <option value="year_desc">年份从新到旧</option>
+          <option value="year_asc">年份从旧到新</option>
+          <option value="title_asc">标题 A→Z</option>
+          <option value="title_desc">标题 Z→A</option>
+        </select>
+      </div>
+    </div>
+    <div class="card-grid" id="doubanGrid"></div>
+  </div>
+  <div class="status-container">
+    <div id="status"></div>
+  </div>
+</div>
+
+<script>
+const status = document.getElementById('status');
+const kwInput = document.getElementById('kw');
+const go = document.getElementById('go');
+const mainContent = document.getElementById('mainContent');
+const doubanTabs = document.getElementById('doubanTabs');
+const doubanGrid = document.getElementById('doubanGrid');
+const sortSelect = document.getElementById('sortSelect');
+
+let doubanItems = [];
+let currentCat = 'hot';
+
+let authToken = localStorage.getItem('searchToken') || '';
+
+function initUI(){
+  mainContent.style.display = 'block';
+  kwInput.focus();
+  status.textContent = '输入影视名称进行豆瓣搜索，点击卡片跳转到资源页';
+  status.className = 'warning';
+  buildDoubanTabs();
+  currentCat = 'hot';
+  loadDoubanCategory(currentCat);
+}
+
+function checkToken(){
+  if(authToken){ initUI(); }
+  else {
+    const to = encodeURIComponent(location.pathname + location.search);
+    location.replace(`/token?redirect=${to}`);
+  }
+}
+
+// Douban
+function buildDoubanTabs(){
+  doubanTabs.innerHTML = '';
+  const items = [
+    {key:'hot', label:'豆瓣热映'},
+    {key:'movie', label:'电影'},
+    {key:'tv', label:'电视剧'},
+    {key:'variety', label:'综艺'}
+  ];
+  items.forEach((it, idx) => {
+    const t = document.createElement('div');
+    t.className = 'tab' + (idx===0 ? ' active':'');
+    t.dataset.key = it.key;
+    t.textContent = it.label;
+    t.onclick = () => { selectDoubanTab(it.key); };
+    doubanTabs.appendChild(t);
+  });
+}
+
+function selectDoubanTab(key){
+  doubanTabs.querySelectorAll('.tab').forEach(el => el.classList.remove('active'));
+  const tab = doubanTabs.querySelector(`.tab[data-key="${key}"]`);
+  if(tab) tab.classList.add('active');
+  currentCat = key || 'hot';
+  if(sortSelect) sortSelect.value = 'default';
+  loadDoubanCategory(currentCat);
+}
+
+async function loadDoubanCategory(cat){
+  try{
+    doubanGrid.innerHTML = '<div style="grid-column:1/-1; text-align:center; padding:8px;"><span class="loading"></span> 加载中...</div>';
+    const res = await fetch(`/api/douban?cat=${encodeURIComponent(cat)}&page_limit=60&page_start=0`);
+    // /api/douban 无需鉴权
+    const data = await res.json();
+    const items = (data && data.subjects) ? data.subjects : [];
+    doubanItems = normalizeItems(items);
+    applyAndRenderSort();
+  }catch(e){
+    doubanGrid.innerHTML = '<div style="grid-column:1/-1; text-align:center; color:#f44336;">加载失败</div>';
+  }
+}
+
+async function searchDouban(){
+  const kw = kwInput.value.trim();
+  if(!kw){ status.textContent = '请输入影视关键词（例如：流浪地球、庆余年）'; status.className = 'warning'; return; }
+  status.innerHTML = '<span class="loading"></span> 正在搜索豆瓣...'; status.className = '';
+  try{
+    doubanGrid.innerHTML = '<div style="grid-column:1/-1; text-align:center; padding:8px;"><span class="loading"></span> 加载中...</div>';
+    const res = await fetch(`/api/douban?suggest=1&q=${encodeURIComponent(kw)}`);
+    const arr = await res.json();
+    const items = Array.isArray(arr) ? arr.map(it => ({
+      title: it.title || it.sub_title || '',
+      sub_title: it.sub_title || '',
+      year: it.year || '',
+      // subject_suggest 常用字段为 img；兼容 cover_url / cover
+      cover: it.img || it.cover_url || it.cover || '',
+      rate: it.rating || '',
+      type: it.type || ''
+    })) : [];
+    doubanItems = normalizeItems(items);
+    if(sortSelect) sortSelect.value = 'default';
+    applyAndRenderSort();
+    status.textContent = '搜索完成，点击卡片前往资源页'; status.className = 'success';
+  }catch(e){ status.textContent = '豆瓣搜索失败: ' + e.message; status.className = 'error'; }
+}
+
+function normalizeItems(items){
+  return (items||[]).map(it => ({
+    title: it.title || '',
+    sub_title: it.sub_title || '',
+    year: it.year || '',
+    cover: it.cover || '',
+    rate: it.rate || '',
+    type: it.type || ''
+  }));
+}
+
+function getSortedItems(items, mode){
+  const arr = items.slice();
+  const num = v => {
+    const n = parseFloat(v); return isNaN(n) ? -Infinity : n;
+  };
+  const numYear = v => {
+    const n = parseInt(v); return isNaN(n) ? -Infinity : n;
+  };
+  switch(mode){
+    case 'rate_desc':
+      return arr.sort((a,b)=> (num(b.rate) - num(a.rate)) );
+    case 'rate_asc':
+      return arr.sort((a,b)=> (num(a.rate) - num(b.rate)) );
+    case 'year_desc':
+      return arr.sort((a,b)=> (numYear(b.year) - numYear(a.year)) );
+    case 'year_asc':
+      return arr.sort((a,b)=> (numYear(a.year) - numYear(b.year)) );
+    case 'title_asc':
+      return arr.sort((a,b)=> (a.title||'').localeCompare(b.title||'', 'zh-Hans-CN') );
+    case 'title_desc':
+      return arr.sort((a,b)=> (b.title||'').localeCompare(a.title||'', 'zh-Hans-CN') );
+    default:
+      return arr; // 保持原顺序
+  }
+}
+
+function applyAndRenderSort(){
+  const mode = sortSelect ? sortSelect.value : 'default';
+  const data = getSortedItems(doubanItems, mode);
+  renderDouban(data);
+}
+
+if(sortSelect){
+  sortSelect.onchange = applyAndRenderSort;
+}
+
+function resetToCategory(){
+  // 还原提示、排序，并加载当前分类
+  status.textContent = '输入影视名称进行豆瓣搜索，点击卡片跳转到资源页';
+  status.className = 'warning';
+  if(sortSelect) sortSelect.value = 'default';
+  loadDoubanCategory(currentCat || 'hot');
+}
+
+// 当输入被清空时，恢复到原始分类页
+kwInput.addEventListener('input', () => {
+  if(kwInput.value.trim() === ''){
+    resetToCategory();
+  }
+});
+
+function renderDouban(items){
+  if(!items || !items.length){
+    doubanGrid.innerHTML = '<div style="grid-column:1/-1; text-align:center; color:#999;">没有找到相关影视</div>';
+    return;
+  }
+  doubanGrid.innerHTML = '';
+  items.forEach(it => {
+    const card = document.createElement('div'); card.className = 'card';
+    card.onclick = () => {
+      const title = it.title || '';
+      if(title) window.location.href = `/search?kw=${encodeURIComponent(title)}`;
+    };
+    const typeMap = { movie:'电影', tv:'电视剧', music:'音乐', book:'图书', game:'游戏' };
+    const typeBadge = it.type ? `<span class=\"badge\">${typeMap[it.type] || it.type}</span>` : '';
+    const rate = it.rate && it.rate !== '0.0' ? `<span class=\"rate\">${it.rate}</span>` : '<span class=\"rate\" style=\"background:#9e9e9e;\">暂无</span>';
+    const year = it.year ? `<span class=\"year\">${it.year}</span>` : '';
+    const imgSrc = it.cover || it.cover_xl || '';
+    card.innerHTML = `
+      <img src="${imgSrc ? '/img?u='+encodeURIComponent(imgSrc) : ''}"
+           alt="${it.title || ''}"
+           loading="lazy"
+           referrerpolicy="no-referrer"
+           onerror="if(this.dataset.fbk!=='1'){this.dataset.fbk='1';this.src='${imgSrc}';}"
+      >
+      <div class="card-body">
+        <div class="title">${it.title || ''}</div>
+        ${it.sub_title ? `<div class=\"subtitle\">${it.sub_title}</div>` : ''}
+        <div class="meta">${typeBadge}${rate}${year}</div>
+      </div>
+    `;
+    doubanGrid.appendChild(card);
+  });
+}
+
+// Events
+go.onclick = searchDouban;
+kwInput.onkeypress = (e) => { if(e.key === 'Enter') searchDouban(); };
+
+checkToken();
+</script>
+</body>
+</html>

@@ -77,14 +77,21 @@ func LoggerMiddleware() gin.HandlerFunc {
 
 
 func AuthMiddleware() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		token := c.GetHeader("Authorization")
-		if token != fmt.Sprintf("Bearer %s", os.Getenv("TOKEN")) {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
-			c.Abort()
-			return
-		}
-		c.Next()
-	}
+    return func(c *gin.Context) {
+        // 使用 Authorization: Bearer <TOKEN> 进行鉴权
+        token := c.GetHeader("Authorization")
+        expected := os.Getenv("TOKEN")
+        if expected == "" {
+            c.JSON(http.StatusUnauthorized, gin.H{"error": "TOKEN not configured"})
+            c.Abort()
+            return
+        }
+        if token != fmt.Sprintf("Bearer %s", expected) {
+            c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+            c.Abort()
+            return
+        }
+        c.Next()
+    }
 }
 	

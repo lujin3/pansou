@@ -3,13 +3,17 @@ package api
 import (
 	// "fmt"
 	"net/http"
-	// "os"
+	"os"
 
+	"io"
+	"mime"
+	"net/url"
 	"pansou/config"
 	"pansou/model"
 	"pansou/service"
 	"pansou/util"
 	jsonutil "pansou/util/json"
+	"path"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -209,5 +213,208 @@ func SearchHandler(c *gin.Context) {
 
 
 func PansouPage(c *gin.Context) {
-	c.HTML(http.StatusOK, "pansou.html", nil)
+    // 回退到前端自行校验token（localStorage），这里直接渲染页面
+    c.HTML(http.StatusOK, "pansou.html", nil)
+}
+
+func DoubanPage(c *gin.Context) {
+    // 回退到前端自行校验token（localStorage），这里直接渲染页面
+    c.HTML(http.StatusOK, "douban.html", nil)
+}
+
+func TokenPage(c *gin.Context) { c.HTML(http.StatusOK, "token.html", nil) }
+
+// VerifyTokenHandler 仅用于校验前端提交的 token（不设置任何 Cookie）
+func VerifyTokenHandler(c *gin.Context) {
+    var req struct{ Token string `json:"token" form:"token"` }
+    _ = c.ShouldBind(&req)
+    if req.Token == "" { req.Token = c.Query("token") }
+    t := strings.TrimSpace(req.Token)
+    if strings.HasPrefix(strings.ToLower(t), "bearer ") { t = strings.TrimSpace(t[7:]) }
+    expected := os.Getenv("TOKEN")
+    if expected == "" {
+        c.JSON(http.StatusUnauthorized, gin.H{"code": 401, "message": "server token not configured"})
+        return
+    }
+    if t == expected {
+        c.JSON(http.StatusOK, gin.H{"code": 0, "message": "ok"})
+        return
+    }
+    c.JSON(http.StatusUnauthorized, gin.H{"code": 401, "message": "invalid token"})
+}
+
+// DoubanProxyHandler 代理请求到豆瓣 j/search_subjects，避免前端CORS问题
+func DoubanProxyHandler(c *gin.Context) {
+    // 支持两种用法：
+    // 1) 直接透传 type/tag/page_limit/page_start/search_text
+    // 2) 通过 cat=hot|movie|tv|variety 使用默认映射
+
+    // 如果是 suggest 模式，转发到 subject_suggest
+    if c.Query("suggest") == "1" || c.Query("endpoint") == "suggest" {
+        qv := url.Values{}
+        qParam := c.Query("q")
+        if qParam != "" { qv.Set("q", qParam) }
+        target := "https://movie.douban.com/j/subject_suggest?" + qv.Encode()
+
+        client := util.GetHTTPClient()
+        req, err := http.NewRequest("GET", target, nil)
+        if err != nil {
+            c.JSON(http.StatusInternalServerError, model.NewErrorResponse(500, "创建请求失败: "+err.Error()))
+            return
+        }
+        req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/117.0 Safari/537.36")
+        req.Header.Set("Accept", "application/json, text/plain, */*")
+        req.Header.Set("Referer", "https://movie.douban.com/")
+
+        resp, err := client.Do(req)
+        if err != nil {
+            c.JSON(http.StatusBadGateway, model.NewErrorResponse(502, "请求豆瓣失败: "+err.Error()))
+            return
+        }
+        defer resp.Body.Close()
+
+        body, err := io.ReadAll(resp.Body)
+        if err != nil {
+            c.JSON(http.StatusBadGateway, model.NewErrorResponse(502, "读取豆瓣响应失败: "+err.Error()))
+            return
+        }
+        if resp.StatusCode != 200 {
+            c.JSON(http.StatusBadGateway, model.NewErrorResponse(502, "豆瓣响应状态异常: "+resp.Status))
+            return
+        }
+        c.Data(http.StatusOK, "application/json; charset=utf-8", body)
+        return
+    }
+
+    // 默认参数（search_subjects）
+    q := url.Values{}
+    pageLimit := c.DefaultQuery("page_limit", "20")
+    pageStart := c.DefaultQuery("page_start", "0")
+    searchText := c.Query("search_text")
+    typ := c.Query("type")
+    tag := c.Query("tag")
+    cat := c.Query("cat")
+
+    // 类别映射（仅在未显式传入type/tag时生效）
+    if typ == "" && tag == "" {
+        switch cat {
+        case "hot":
+            typ = "movie"
+            tag = "热门"
+        case "movie":
+            typ = "movie"
+            tag = "热门"
+        case "tv":
+            typ = "tv"
+            tag = "热门"
+        case "variety":
+            typ = "tv"
+            tag = "综艺"
+        }
+    }
+
+    if typ != "" { q.Set("type", typ) }
+    if tag != "" { q.Set("tag", tag) }
+    if searchText != "" { q.Set("search_text", searchText) }
+    q.Set("page_limit", pageLimit)
+    q.Set("page_start", pageStart)
+
+    target := "https://movie.douban.com/j/search_subjects?" + q.Encode()
+
+    client := util.GetHTTPClient()
+    req, err := http.NewRequest("GET", target, nil)
+    if err != nil {
+        c.JSON(http.StatusInternalServerError, model.NewErrorResponse(500, "创建请求失败: "+err.Error()))
+        return
+    }
+    // 设置请求头，尽量模拟浏览器
+    req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/117.0 Safari/537.36")
+    req.Header.Set("Accept", "application/json, text/plain, */*")
+    req.Header.Set("Referer", "https://movie.douban.com/")
+
+    resp, err := client.Do(req)
+    if err != nil {
+        c.JSON(http.StatusBadGateway, model.NewErrorResponse(502, "请求豆瓣失败: "+err.Error()))
+        return
+    }
+    defer resp.Body.Close()
+
+    body, err := io.ReadAll(resp.Body)
+    if err != nil {
+        c.JSON(http.StatusBadGateway, model.NewErrorResponse(502, "读取豆瓣响应失败: "+err.Error()))
+        return
+    }
+
+    if resp.StatusCode != 200 {
+        c.JSON(http.StatusBadGateway, model.NewErrorResponse(502, "豆瓣响应状态异常: "+resp.Status))
+        return
+    }
+
+    // 直接透传JSON
+    c.Data(http.StatusOK, "application/json; charset=utf-8", body)
+}
+
+// ImageProxyHandler 代理外部图片，主要用于豆瓣图片防盗链/跨域问题
+func ImageProxyHandler(c *gin.Context) {
+    raw := c.Query("u")
+    if raw == "" {
+        raw = c.Query("url")
+    }
+    if raw == "" {
+        c.Status(http.StatusBadRequest)
+        return
+    }
+    u, err := url.Parse(raw)
+    if err != nil || !u.IsAbs() {
+        c.Status(http.StatusBadRequest)
+        return
+    }
+    host := strings.ToLower(u.Host)
+    // 仅允许豆瓣相关域名，避免开放代理风险
+    allowed := false
+    if strings.HasSuffix(host, ".douban.com") || strings.HasSuffix(host, ".doubanio.com") {
+        allowed = true
+    }
+    if !allowed {
+        c.Status(http.StatusForbidden)
+        return
+    }
+
+    client := util.GetHTTPClient()
+    req, err := http.NewRequest("GET", u.String(), nil)
+    if err != nil {
+        c.Status(http.StatusInternalServerError)
+        return
+    }
+    // 模拟浏览器，携带豆瓣Referer以通过防盗链
+    req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/117.0 Safari/537.36")
+    req.Header.Set("Accept", "image/avif,image/webp,image/apng,image/*,*/*;q=0.8")
+    req.Header.Set("Referer", "https://movie.douban.com/")
+
+    resp, err := client.Do(req)
+    if err != nil {
+        c.Status(http.StatusBadGateway)
+        return
+    }
+    defer resp.Body.Close()
+
+    if resp.StatusCode != http.StatusOK {
+        c.Status(http.StatusBadGateway)
+        return
+    }
+
+    // 透传图片数据与类型
+    ct := resp.Header.Get("Content-Type")
+    if ct == "" {
+        // 根据扩展名猜测类型
+        ext := path.Ext(u.Path)
+        if ext != "" {
+            if t := mime.TypeByExtension(ext); t != "" { ct = t }
+        }
+        if ct == "" { ct = "image/jpeg" }
+    }
+    c.Header("Content-Type", ct)
+    c.Header("Cache-Control", "public, max-age=86400")
+    body, _ := io.ReadAll(resp.Body)
+    c.Data(http.StatusOK, ct, body)
 }

@@ -1,6 +1,7 @@
 # 新增 UI
 
 ![Token 验证访问](docs/Token.png)
+![豆瓣搜索](docs/DoubanSearch.png)
 ![搜索页面](docs/Search.png)
 
 

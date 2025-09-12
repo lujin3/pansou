@@ -42,21 +42,11 @@ button:disabled { background:#ccc; cursor:not-allowed; }
 @media (min-width:600px){ .item{flex:1 1 calc(50% - 16px);} }
 @media (min-width:900px){ .item{flex:1 1 calc(33% - 16px);} }
 
-/* 模态框样式 */
-#tokenModal { display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,.5); justify-content:center; align-items:center; z-index:9999; }
-#tokenModalContent { background:#fff; padding:24px; border-radius:12px; max-width:400px; width:90%; box-shadow:0 4px 12px rgba(0,0,0,.2); text-align:center; }
-#tokenModalContent input { width:80%; margin-bottom:16px; }
-#tokenModalContent button { width:80%; font-size:16px; }
+/* 令牌改为独立页面 /token */
 </style>
 </head>
 <body>
-<div id="tokenModal">
-  <div id="tokenModalContent">
-    <h3>请输入访问令牌</h3>
-    <input id="modalToken" type="password" placeholder="Token">
-    <button id="modalSave">保存</button>
-  </div>
-</div>
+<!-- 令牌弹窗移除，未授权由服务端重定向到 /token -->
 
 <div class="container" id="mainContent" style="display:none;">
   <div class="top-section">
@@ -85,12 +75,9 @@ const go = document.getElementById('go');
 const tabs = document.getElementById('tabs');
 const results = document.getElementById('results');
 const emptyState = document.getElementById('emptyState');
-const tokenModal = document.getElementById('tokenModal');
-const modalToken = document.getElementById('modalToken');
-const modalSave = document.getElementById('modalSave');
 const mainContent = document.getElementById('mainContent');
 
-// Initialize token from localStorage or use empty string
+// 使用localStorage中的token，对/api/search附加Authorization
 let authToken = localStorage.getItem('searchToken') || '';
 
 const typeMap = {
@@ -115,35 +102,19 @@ function initUI(){
   kwInput.focus();
   status.textContent = '请输入关键词开始搜索';
   status.className = 'warning';
+  const params = new URLSearchParams(location.search);
+  const kw = params.get('kw');
+  if(kw){ kwInput.value = kw; search(); }
 }
 
 function checkToken(){
-  if(authToken){
-    initUI();
-  } else {
-    tokenModal.style.display = 'flex';
-    tokenTip.style.display = 'none'; // 初始时隐藏提示
-    modalToken.focus();
-  }
-}
-
-// Modal save button handler
-modalSave.onclick = () => {
-  const val = modalToken.value.trim();
-  if(!val) {
-    alert('请输入有效的令牌');
+  if(!authToken){
+    const to = encodeURIComponent(location.pathname + location.search);
+    location.replace(`/token?redirect=${to}`);
     return;
   }
-  authToken = val;
-  localStorage.setItem('searchToken', authToken);
-  tokenModal.style.display = 'none';
   initUI();
-};
-
-// Allow Enter key in modal
-modalToken.onkeypress = (e) => {
-  if(e.key === 'Enter') modalSave.click();
-};
+}
 
 async function search(){
   const kw = kwInput.value.trim();
@@ -166,15 +137,7 @@ async function search(){
     
     if(res.status === 401){
       localStorage.removeItem('searchToken');
-      authToken = '';
-      tokenModal.style.display = 'flex';
-      modalToken.value = '';
-      modalToken.focus();
-      mainContent.style.display = 'none';
-      tokenTip.textContent = '访问令牌已过期或无效，请重新输入';
-      tokenTip.style.display = 'block';
-      tokenTip.style.color = '#f44336';
-      return;
+      location.replace(`/token?redirect=${encodeURIComponent(location.pathname+location.search)}`); return;
     }
     
     const data = await res.json();
@@ -239,16 +202,14 @@ function show(type){
   const targetList = document.getElementById(`list-${type}`);
   if(targetList) targetList.style.display = 'flex';
   
-  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-  const targetTab = document.querySelector(`.tab[data-type="${type}"]`);
+  document.querySelectorAll('#tabs .tab').forEach(t => t.classList.remove('active'));
+  const targetTab = document.querySelector(`#tabs .tab[data-type="${type}"]`);
   if(targetTab) targetTab.classList.add('active');
 }
 
-// Event listeners
+// 事件
 go.onclick = search;
-kwInput.onkeypress = (e) => { 
-  if(e.key === 'Enter') search(); 
-};
+kwInput.onkeypress = (e) => { if(e.key === 'Enter') search(); };
 
 // Initialize the app
 checkToken();
